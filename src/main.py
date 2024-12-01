@@ -1,276 +1,40 @@
-import json
 import logging
-import os
 from pathlib import Path
-from typing import List, Optional
-
-import yaml
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
-from langchain.prompts import PromptTemplate
-from langchain_community.callbacks.manager import get_openai_callback
-from langchain_core.runnables import RunnableSequence
+from config.config_loader import Config
+from logging.logger import setup_logger
+from extractors.html_extractor import HTMLExtractor
+from analyzers.html_analyzer import HTMLAnalyzer
+from utils.file_utils import save_to_json
 from langchain_xai import ChatXAI
-
 from prompts import get_summary_prompt
 
-# =========================
-# Configuration and Logging Setup
-# =========================
-
-
-class Config:
-    """Class to load and maintain configuration settings."""
-
-    def __init__(self, config_path: str = "config.yaml"):
-        """
-        Initializes the Config class with a given configuration path.
-
-        Args:
-            config_path (str): Path to the configuration file. Defaults to "config.yaml".
-        """
-        self.config_path = config_path
-        self.config = self.load_config()
-
-    def load_config(self) -> dict:
-        """Loads configuration from a YAML file and resolves environment variables."""
-        if not os.path.exists(self.config_path):
-            raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
-
-        with open(self.config_path, "r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
-
-        # Replace environment variable placeholders with actual values
-        config = self.resolve_env_variables(config)
-        return config
-
-    def resolve_env_variables(self, config: dict) -> dict:
-        """Resolve environment variable placeholders in the configuration."""
-        if isinstance(config, dict):
-            for key, value in config.items():
-                config[key] = self.resolve_env_variables(value)
-        elif isinstance(config, list):
-            config = [self.resolve_env_variables(item) for item in config]
-        elif (
-            isinstance(config, str) and config.startswith("${") and config.endswith("}")
-        ):
-            env_var = config[2:-1]
-            env_value = os.getenv(env_var)
-            if not env_value:
-                raise EnvironmentError(f"Environment variable '{env_var}' is not set.")
-            return env_value
-        return config
-
-
-def setup_logging(log_file: str, log_level: str):
-    """Set up logging."""
-    numeric_level = getattr(logging, log_level.upper(), None)
-    if not isinstance(numeric_level, int):
-        numeric_level = logging.INFO
-
-    logging.basicConfig(
-        level=numeric_level,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
-    )
-    return logging.getLogger(__name__)
-
-
-# =========================
-# HTML Processing Classes
-# =========================
-
-
-class HTMLExtractor:
-    """Class to extract text from HTML files."""
-
-    @staticmethod
-    def extract_text(html_path: Path) -> str:
-        """Extract text from the specified HTML file.
-
-        Args:
-            html_path (Path): Path to the HTML file.
-
-        Returns:
-            str: Extracted text.
-        """
-        logger.info(f"Extracting text from HTML file: {html_path}")
-        try:
-            with open(html_path, "r", encoding="utf-8") as file:
-                soup = BeautifulSoup(file, "html.parser")
-                text = soup.get_text(separator="\n").strip()
-            logger.info(f"Completed text extraction from HTML: {html_path}")
-            return text
-        except Exception as e:
-            logger.error(
-                f"Error occurred while extracting text from HTML '{html_path}': {e}"
-            )
-            raise
-
-
-class HTMLAnalyzer:
-    """Class to manage HTML analysis and save results."""
-
-    def __init__(
-        self, chat_xai: ChatXAI, prompt_template: PromptTemplate, max_length: int
-    ):
-        """Initialize the HTMLAnalyzer.
-
-        Args:
-            chat_xai (ChatXAI): Instance of ChatXAI.
-            prompt_template (PromptTemplate): Prompt template.
-            max_length (int): Maximum length of the summary.
-        """
-        self.chain = RunnableSequence(prompt_template, chat_xai)
-        self.max_length = max_length
-
-    def analyze_text(self, text: str) -> dict:
-        """Analyze the extracted text and return the results along with token usage.
-
-        Args:
-            text (str): Text to analyze.
-
-        Returns:
-            dict: Analysis results and token usage.
-        """
-        logger.info("Analyzing text using the Grok AI model.")
-        try:
-            with get_openai_callback() as cb:
-                summary = self.chain.invoke({"document": text})
-                logger.info("Text analysis completed.")
-                logger.info(f"Tokens used: {cb.total_tokens}")
-
-            summary_text = getattr(summary, "content", str(summary))
-
-            if len(summary_text) > self.max_length:
-                summary_text = summary_text[: self.max_length]
-                logger.warning(
-                    f"Summary exceeded the maximum length of {self.max_length} characters and was truncated."
-                )
-
-            return {"summary": summary_text, "used_tokens": cb.total_tokens}
-        except Exception as e:
-            logger.error(f"Error occurred during text analysis: {e}")
-            raise
-
-    @staticmethod
-    def save_to_json(data: dict, output_path: Path):
-        """Save analysis results to a JSON file.
-
-        Args:
-            data (dict): Data to save.
-            output_path (Path): Path to save the JSON file.
-        """
-        logger.info(f"Saving analysis results to JSON file: {output_path}")
-        try:
-            with open(output_path, "w", encoding="utf-8") as json_file:
-                json.dump(data, json_file, ensure_ascii=False, indent=4)
-            logger.info(f"Successfully saved JSON file: {output_path}")
-        except Exception as e:
-            logger.error(f"Error occurred while saving JSON file '{output_path}': {e}")
-            raise
-
-
-# =========================
-# Main Processing Function
-# =========================
-
-
-def load_configuration(config_path: str = "config.yaml") -> dict:
-    """Load configuration from a YAML file.
-
-    Args:
-        config_path (str, optional): Path to the configuration file. Default is "config.yaml".
-
-    Returns:
-        dict: Configuration dictionary.
-    """
-    config_loader = Config(config_path)
-    return config_loader.config
-
-
 def main():
-    """Main processing function."""
-    logger.info("Starting the application.")
-
-    config = load_configuration()
-    max_length = config.get("summary", {}).get("max_length", 500)
+    config = Config().config
+    logger = setup_logger(
+        config["logging"]["log_file"],
+        config["logging"]["log_level"]
+    )
 
     input_dir = Path(config["directories"]["input"])
     output_dir = Path(config["directories"]["output"])
     input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Input directory: {input_dir.resolve()}")
-    logger.info(f"Output directory: {output_dir.resolve()}")
 
-    chat_xai = ChatXAI(
-        xai_api_key=config["xai"]["api_key"],
-        model="grok-beta",
-        temperature=0.7,
-    )
-
-    template = get_summary_prompt(max_length=max_length)
-
-    analyzer = HTMLAnalyzer(
-        chat_xai=chat_xai, prompt_template=template, max_length=max_length
-    )
-
-    html_files = list(input_dir.glob("*.html"))
+    html_files = input_dir.glob("*.html")
     if not html_files:
-        logger.warning(f"No HTML files found in {input_dir}.")
-        return
+        logger.warning("No HTML files found.")
 
-    for html_path in html_files:
-        try:
-            output_json_path = output_dir / f"{html_path.stem}_summary.json"
+    chat_xai = ChatXAI(config["xai"]["api_key"])
+    template = get_summary_prompt(max_length=config["summary"]["max_length"])
 
-            if output_json_path.exists():
-                logger.info(
-                    f"Skipping {html_path.name} as {output_json_path.name} already exists."
-                )
-                continue
+    extractor = HTMLExtractor()
+    analyzer = HTMLAnalyzer(chat_xai, template)
 
-            logger.info(f"Processing HTML: {html_path.name}")
-            extractor = HTMLExtractor()
-            html_text = extractor.extract_text(html_path)
-
-            analysis_result = analyzer.analyze_text(html_text)
-
-            result = {
-                "input_html": str(html_path.resolve()),
-                "prompt": template.template.strip(),
-                "summary": analysis_result["summary"],
-                "used_tokens": analysis_result["used_tokens"],
-            }
-
-            analyzer.save_to_json(result, output_json_path)
-
-            logger.info(f"Successfully processed and saved: {output_json_path.name}")
-
-        except Exception as e:
-            logger.error(f"Failed to process HTML '{html_path.name}': {e}")
-            continue
-
-    logger.info("Application processing completed.")
+    for file in html_files:
+        text = extractor.extract_text(file)
+        analysis = analyzer.analyze(text)
+        save_to_json(analysis, output_dir / f"{file.stem}_summary.json")
 
 
 if __name__ == "__main__":
-    load_dotenv()
-
-    try:
-        initial_config = load_configuration()
-    except Exception as e:
-        print(f"Failed to load configuration: {e}")
-        exit(1)
-
-    setup_logging(
-        log_file=initial_config.get("logging", {}).get("log_file", "app.log"),
-        log_level=initial_config.get("logging", {}).get("log_level", "INFO"),
-    )
-    logger = logging.getLogger(__name__)
-
-    try:
-        main()
-    except Exception as e:
-        logger.critical(f"A critical error occurred during application execution: {e}")
-        exit(1)
+    main()
