@@ -2,18 +2,25 @@ from langchain.prompts import PromptTemplate
 
 def get_summary_prompt(max_length: int) -> PromptTemplate:
     """
-    Returns a PromptTemplate for summarizing text.
+    Generate a summary prompt template that ensures the summary does not exceed a specified length.
 
     Args:
         max_length (int): Maximum length of the summary.
 
     Returns:
-        PromptTemplate: A LangChain PromptTemplate instance.
+        PromptTemplate: The prompt template for summarization.
     """
-    template = f"""
-    Provide a concise summary of the following text in no more than {max_length} characters. 
-    Do not include any introductory phrases or headings.
-
-    {{document}}
-    """
-    return PromptTemplate(template=template, input_variables=["document"])
+    template = (
+        "You are an advanced summarization model. Your task is to provide a concise "
+        "and coherent summary of the given document. The summary should be no longer "
+        "than {max_length} characters, ensuring clarity and relevance. Avoid including "
+        "unnecessary details or repeating information. If necessary, focus only on the "
+        "most critical points to adhere to the character limit.\n\n"
+        "Document:\n{document}\n\n"
+        "Summary (max {max_length} characters):"
+    )
+    return PromptTemplate(
+        input_variables=["document"],
+        template=template,
+        partial_variables={"max_length": max_length}
+    )

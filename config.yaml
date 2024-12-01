@@ -1,13 +1,26 @@
-directories:
-  input: "input"
-  output: "output"
-
-xai:
-  api_key: "${XAI_API_KEY}"
-
+# =========================
+# Logging Configuration
+# =========================
 logging:
   log_file: "app.log"
   log_level: "INFO"
 
+# =========================
+# Directory Configuration
+# =========================
+directories:
+  input: "input"
+  output: "output"
+
+# =========================
+# Summary Configuration
+# =========================
 summary:
   max_length: 2500
+
+# =========================
+# XAI Configuration
+# =========================
+xai:
+  api_key: "${XAI_API_KEY}"
+  model: "grok-beta"
