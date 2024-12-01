@@ -169,5 +169,5 @@ input/*
 output/*
 
 # Exeption for Example files
-!input/bitcoin.pdf
-!output/bitcoin_summary.json
+!input/1706.03762.html
+!output/1706.03762_summary.json

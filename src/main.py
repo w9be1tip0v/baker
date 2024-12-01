@@ -5,7 +5,6 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 import yaml
-from dotenv import load_dotenv
 from langchain.prompts import PromptTemplate
 from langchain_community.callbacks.manager import get_openai_callback
 from langchain_core.runnables import RunnableSequence
@@ -21,12 +20,6 @@ class Config:
     """Class to load and maintain configuration settings."""
 
     def __init__(self, config_path: str = "config.yaml"):
-        """
-        Initializes the Config class with a given configuration path.
-
-        Args:
-            config_path (str): Path to the configuration file. Defaults to "config.yaml".
-        """
         self.config_path = config_path
         self.config = self.load_config()
 
@@ -34,21 +27,16 @@ class Config:
         """Loads configuration from a YAML file and resolves environment variables."""
         if not os.path.exists(self.config_path):
             raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
-
         with open(self.config_path, "r", encoding="utf-8") as file:
             config = yaml.safe_load(file)
-
-        # Replace environment variable placeholders with actual values
-        config = self.resolve_env_variables(config)
-        return config
+        return self.resolve_env_variables(config)
 
     def resolve_env_variables(self, config: dict) -> dict:
         """Resolve environment variable placeholders in the configuration."""
         if isinstance(config, dict):
-            for key, value in config.items():
-                config[key] = self.resolve_env_variables(value)
+            return {key: self.resolve_env_variables(value) for key, value in config.items()}
         elif isinstance(config, list):
-            config = [self.resolve_env_variables(item) for item in config]
+            return [self.resolve_env_variables(item) for item in config]
         elif (
             isinstance(config, str) and config.startswith("${") and config.endswith("}")
         ):
@@ -65,7 +53,6 @@ def setup_logging(log_file: str, log_level: str):
     numeric_level = getattr(logging, log_level.upper(), None)
     if not isinstance(numeric_level, int):
         numeric_level = logging.INFO
-
     logging.basicConfig(
         level=numeric_level,
         format="%(asctime)s - %(levelname)s - %(message)s",
@@ -83,97 +70,52 @@ class HTMLExtractor:
 
     @staticmethod
     def extract_text(html_path: Path) -> str:
-        """
-        Extract text from the specified HTML file.
-
-        Args:
-            html_path (Path): Path to the HTML file.
-
-        Returns:
-            str: Extracted text.
-        """
         logger.info(f"Extracting text from HTML file: {html_path}")
         try:
             with open(html_path, "r", encoding="utf-8") as file:
                 soup = BeautifulSoup(file, "html.parser")
-                text = soup.get_text(separator="\n").strip()
-            logger.info(f"Completed text extraction from HTML: {html_path}")
-            return text
+                return soup.get_text(separator="\n").strip()
         except Exception as e:
-            logger.error(
-                f"Error occurred while extracting text from HTML '{html_path}': {e}"
-            )
+            logger.error(f"Error extracting text from {html_path}: {e}")
             raise
 
 
 class HTMLAnalyzer:
     """Class to manage HTML analysis and save results."""
 
-    def __init__(
-        self, chat_xai: ChatXAI, prompt_template: PromptTemplate, max_length: int
-    ):
-        """
-        Initialize the HTMLAnalyzer.
-
-        Args:
-            chat_xai (ChatXAI): Instance of ChatXAI.
-            prompt_template (PromptTemplate): Prompt template.
-            max_length (int): Maximum length of the summary.
-        """
+    def __init__(self, chat_xai: ChatXAI, prompt_template: PromptTemplate, max_length: int):
         self.chain = RunnableSequence(prompt_template, chat_xai)
         self.max_length = max_length
 
     def analyze_text(self, text: str) -> dict:
-        """
-        Analyze the extracted text and return the results along with input and output token usage.
-
-        Args:
-            text (str): Text to analyze.
-
-        Returns:
-            dict: Analysis results including input and output token usage.
-        """
         logger.info("Analyzing text using the Grok AI model.")
         try:
             with get_openai_callback() as cb:
                 summary = self.chain.invoke({"document": text})
-                logger.info("Text analysis completed.")
-                logger.info(f"Input tokens: {cb.prompt_tokens}, Output tokens: {cb.completion_tokens}")
+                summary_text = getattr(summary, "content", str(summary))
 
-            summary_text = getattr(summary, "content", str(summary))
+                # Truncate if necessary
+                if len(summary_text) > self.max_length:
+                    summary_text = summary_text[:self.max_length]
+                    logger.warning("Summary truncated due to length limit.")
 
-            # Ensure the summary does not exceed the maximum length
-            if len(summary_text) > self.max_length:
-                summary_text = summary_text[: self.max_length]
-                logger.warning(
-                    f"Summary exceeded the maximum length of {self.max_length} characters and was truncated."
-                )
-
-            return {
-                "summary": summary_text,
-                "input_tokens": cb.prompt_tokens,
-                "output_tokens": cb.completion_tokens,
-            }
+                return {
+                    "summary": summary_text,
+                    "input_tokens": cb.prompt_tokens,
+                    "output_tokens": cb.completion_tokens,
+                }
         except Exception as e:
-            logger.error(f"Error occurred during text analysis: {e}")
+            logger.error(f"Error analyzing text: {e}")
             raise
 
     @staticmethod
     def save_to_json(data: dict, output_path: Path):
-        """
-        Save analysis results to a JSON file.
-
-        Args:
-            data (dict): Data to save.
-            output_path (Path): Path to save the JSON file.
-        """
-        logger.info(f"Saving analysis results to JSON file: {output_path}")
+        logger.info(f"Saving analysis results to {output_path}")
         try:
             with open(output_path, "w", encoding="utf-8") as json_file:
                 json.dump(data, json_file, ensure_ascii=False, indent=4)
-            logger.info(f"Successfully saved JSON file: {output_path}")
         except Exception as e:
-            logger.error(f"Error occurred while saving JSON file '{output_path}': {e}")
+            logger.error(f"Error saving JSON file: {e}")
             raise
 
 
@@ -182,21 +124,10 @@ class HTMLAnalyzer:
 # =========================
 
 def load_configuration(config_path: str = "config.yaml") -> dict:
-    """
-    Load configuration from a YAML file.
-
-    Args:
-        config_path (str, optional): Path to the configuration file. Default is "config.yaml".
-
-    Returns:
-        dict: Configuration dictionary.
-    """
-    config_loader = Config(config_path)
-    return config_loader.config
+    return Config(config_path).config
 
 
 def main():
-    """Main processing function."""
     logger.info("Starting the application.")
 
     config = load_configuration()
@@ -206,79 +137,43 @@ def main():
     output_dir = Path(config["directories"]["output"])
     input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Input directory: {input_dir.resolve()}")
-    logger.info(f"Output directory: {output_dir.resolve()}")
+    logger.info(f"Input directory: {input_dir}")
+    logger.info(f"Output directory: {output_dir}")
 
-    # Initialize ChatXAI using configuration
     chat_xai = ChatXAI(
         xai_api_key=config["xai"]["api_key"],
         model=config["xai"]["model"],
         temperature=0.7,
     )
-
     template = get_summary_prompt(max_length=max_length)
+    analyzer = HTMLAnalyzer(chat_xai, template, max_length)
 
-    analyzer = HTMLAnalyzer(
-        chat_xai=chat_xai, prompt_template=template, max_length=max_length
-    )
-
-    html_files = list(input_dir.glob("*.html"))
-    if not html_files:
-        logger.warning(f"No HTML files found in {input_dir}.")
-        return
-
-    for html_path in html_files:
+    for html_path in input_dir.glob("*.html"):
         try:
-            output_json_path = output_dir / f"{html_path.stem}_summary.json"
-
-            if output_json_path.exists():
-                logger.info(
-                    f"Skipping {html_path.name} as {output_json_path.name} already exists."
-                )
+            output_path = output_dir / f"{html_path.stem}_summary.json"
+            if output_path.exists():
+                logger.info(f"Skipping {html_path.name}: Output file already exists.")
                 continue
 
-            logger.info(f"Processing HTML: {html_path.name}")
-            extractor = HTMLExtractor()
-            html_text = extractor.extract_text(html_path)
+            text = HTMLExtractor.extract_text(html_path)
+            analysis_result = analyzer.analyze_text(text)
 
-            analysis_result = analyzer.analyze_text(html_text)
-
+            # Replace placeholder in the prompt with actual value
+            formatted_prompt = template.template.replace("{max_length}", str(max_length))
             result = {
-                "input_html": str(html_path.resolve()),
-                "prompt": template.template.strip(),
+                "input_html": str(html_path),
+                "prompt": formatted_prompt,
                 "summary": analysis_result["summary"],
                 "input_tokens": analysis_result["input_tokens"],
                 "output_tokens": analysis_result["output_tokens"],
             }
-
-            analyzer.save_to_json(result, output_json_path)
-
-            logger.info(f"Successfully processed and saved: {output_json_path.name}")
-
+            analyzer.save_to_json(result, output_path)
         except Exception as e:
-            logger.error(f"Failed to process HTML '{html_path.name}': {e}")
-            continue
+            logger.error(f"Failed to process {html_path.name}: {e}")
 
     logger.info("Application processing completed.")
 
 
 if __name__ == "__main__":
-    load_dotenv()
-
-    try:
-        initial_config = load_configuration()
-    except Exception as e:
-        print(f"Failed to load configuration: {e}")
-        exit(1)
-
-    setup_logging(
-        log_file=initial_config.get("logging", {}).get("log_file", "app.log"),
-        log_level=initial_config.get("logging", {}).get("log_level", "INFO"),
-    )
-    logger = logging.getLogger(__name__)
-
-    try:
-        main()
-    except Exception as e:
-        logger.critical(f"A critical error occurred during application execution: {e}")
-        exit(1)
+    logger = setup_logging(log_file="app.log", log_level="INFO")
+    main()
