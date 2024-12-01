@@ -12,9 +12,9 @@ def get_summary_prompt(max_length: int) -> PromptTemplate:
     """
     template = (
         "You are an advanced summarization model. Your task is to provide a concise "
-        "and coherent summary of the given document. The summary should be no longer "
-        "than {max_length} characters, ensuring clarity and relevance. Avoid including "
-        "unnecessary details or repeating information. If necessary, focus only on the "
+        "summary of the given document. The summary must not exceed than {max_length} characters,"
+        "ensuring clarity and relevance. Avoid including unnecessary "
+        "details or repeating information. If necessary, focus only on the "
         "most critical points to adhere to the character limit.\n\n"
         "Document:\n{document}\n\n"
         "Summary (max {max_length} characters):"
