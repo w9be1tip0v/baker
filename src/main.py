@@ -125,20 +125,20 @@ class HTMLAnalyzer:
 
     def analyze_text(self, text: str) -> dict:
         """
-        Analyze the extracted text and return the results along with token usage.
+        Analyze the extracted text and return the results along with input and output token usage.
 
         Args:
             text (str): Text to analyze.
 
         Returns:
-            dict: Analysis results and token usage.
+            dict: Analysis results including input and output token usage.
         """
         logger.info("Analyzing text using the Grok AI model.")
         try:
             with get_openai_callback() as cb:
                 summary = self.chain.invoke({"document": text})
                 logger.info("Text analysis completed.")
-                logger.info(f"Tokens used: {cb.total_tokens}")
+                logger.info(f"Input tokens: {cb.prompt_tokens}, Output tokens: {cb.completion_tokens}")
 
             summary_text = getattr(summary, "content", str(summary))
 
@@ -149,7 +149,11 @@ class HTMLAnalyzer:
                     f"Summary exceeded the maximum length of {self.max_length} characters and was truncated."
                 )
 
-            return {"summary": summary_text, "used_tokens": cb.total_tokens}
+            return {
+                "summary": summary_text,
+                "input_tokens": cb.prompt_tokens,
+                "output_tokens": cb.completion_tokens,
+            }
         except Exception as e:
             logger.error(f"Error occurred during text analysis: {e}")
             raise
@@ -243,7 +247,8 @@ def main():
                 "input_html": str(html_path.resolve()),
                 "prompt": template.template.strip(),
                 "summary": analysis_result["summary"],
-                "used_tokens": analysis_result["used_tokens"],
+                "input_tokens": analysis_result["input_tokens"],
+                "output_tokens": analysis_result["output_tokens"],
             }
 
             analyzer.save_to_json(result, output_json_path)
